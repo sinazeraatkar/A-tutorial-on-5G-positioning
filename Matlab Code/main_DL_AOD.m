@@ -5,18 +5,18 @@ clearvars -except viewer;
 rng(42);                       % Set RNG state for repeatability
 pd = truncate(makedist("Normal", "sigma",50),-100,100); % probability distribution
                             
-reflections_order = 2;       % 0 (LOS) default | 1 (NLOS)
+reflections_order = 1;       % 0 (LOS) default | 1 (NLOS)
 plot_rays = true;            % plot raytracer rays on map
 refinement = true;          % true (P2) default | false (only P1)
 
-num_tests = 1;             
+num_tests =  1;             
 dimensions = 3;            % 2/3-D
 K = 1000;                  % number of iteration for NLS algorithm
 stop_cond = 1e-4;
 
 drop_nlos = true;           % drop NLOS BS
 BS_synch = true;            % BS synchronized?
-max_gNBs = 5;               % Max number of BS used
+max_gNBs = 4;               % Max number of BS used
 
 %% Simulation Parameters
 % Bandwidth configuration, required to set the channel sampling rate and for perfect channel estimation
@@ -90,13 +90,31 @@ ueArrayOrientation = [0 45].';      % azimuth (0 deg is E, 90 deg is N) and
 
 
 %% UE positions
-load ue_positions/giuriati.mat
-numUEPos = size(listUEPos,1); 
+listUEPos = [
+    48.624447,2.443096;
+    48.624423,2.443125;
+    48.624447,2.443156;
+    48.624423,2.443185;
+    48.624410,2.443215;
+    48.624390,2.443245;
+    48.624380,2.443275;
+    48.624370,2.443305
+
+
+
+];
+numUEPos = size(listUEPos,1);
 
 %% gNBs positions
 n_cell = 3; % number of cells
-h_gNB = 4; % height [m]
-load bs_positions/campus_leonardo.mat % bs positions and map name
+h_gNB = 10; % height [m]
+
+% Manually define 4 Base Stations surrounding the UE in Palaiseau
+gNBPos = [
+     48.624516,2.442086; % South-East of UE
+     48.623647,2.446412;
+     48.622207,2.443953
+];
 
 numBSs = size(gNBPos,1);
 TxArrayOrientation = [[0 0]; [120 0]; [-120 0]];
@@ -116,12 +134,13 @@ end
 numgNBs = size(gNBs,1);
 
 %% Setup Viewer
-
 if exist('viewer','var') && isvalid(viewer) % viewer handle exists and viewer window is open
     viewer.clearMap();
 else
-    viewer = siteviewer("Basemap","openstreetmap","Buildings",map);   
+    % Explicitly load your custom OSM file
+    viewer = siteviewer("Basemap","openstreetmap","Buildings","map.osm");   
 end
+
 
 bsSite = cell(1,numgNBs);
 bsArray = cell(1,numgNBs);
@@ -241,7 +260,18 @@ end
 
 prm.SSBTransmitted = [ones(1,ssbsymb) zeros(1,0)];   % 4/8 or 64 in length
 prm = validateParams(prm);
-        
+%% Performance Analysis Storage
+% Initialize arrays to store results across all UE positions
+numPositions = numUEPos * num_tests;
+error_euclidean = zeros(numPositions, 1);
+error_azimuth = [];
+error_elevation = [];
+measured_rsrp = [];
+track_idx = 1; % Index to keep track of total tests run
+error_horizontal = zeros(numPositions, 1); % This is your LSh
+error_vertical = zeros(numPositions, 1);   % This is your LSv
+% gif_filename = '5G_Posiation.gif';
+% first_frame = true;tioning_Simul
 %% For each UE position
 for posIdx = 1: numUEPos
     numgNBs = size(gNBs,1);
@@ -294,13 +324,13 @@ for posIdx = 1: numUEPos
                 SPSite = cell(1,N);
                 for i = 1: N
                     M = cellRays(i).NumInteractions;
-                    scatter = zeros(2,M);
+                    scatter_coords = zeros(2,M);
                     for j = 1:M
-                        scatter(:,j) = cellRays(i).Interactions(j).Location(1:2)';
+                        scatter_coords(:,j) = cellRays(i).Interactions(j).Location(1:2)';
                     end
                     if M>0
                         SPSite{i} = rxsite("Name","Scatter"+i, ...
-                        "Latitude",scatter(1,:),"Longitude",scatter(2,:));
+                        "Latitude",scatter_coords(1,:),"Longitude",scatter_coords(2,:));
                     else
                         SPSite{i} = rxsite("Name","Scatter"+i, ...
                         "Latitude",0,"Longitude",0);
@@ -693,6 +723,36 @@ for posIdx = 1: numUEPos
                 for beamIdx = 1:numPRSBeams
                     wT{gNBIdx}(:,beamIdx) = SteerVecTx(fc,prsBeamAng(:,beamIdx));
                 end 
+%                 % ---------------------------------------------------------
+% % Plot the Refined 12-Beam PRS Codebook (Polar Plot)
+% % ---------------------------------------------------------
+% if refinement
+%     figure('Name', ['PRS Codebook for gNB ' num2str(reachable_gNBs(gNBIdx).pci)], 'Color', 'w');
+%     ax = polaraxes;
+%     hold on;
+% 
+%     % 1. Explicitly define the azimuth sweep (-180 to 180 degrees)
+%     az_angles = -180:1:180;
+% 
+%     % Loop through all 12 PRS beams
+%     for beamIdx = 1:numPRSRes
+%         % 2. Use the universal 'pattern' function instead of 'patternAzimuth'
+%         pat = pattern(reachable_gNBs(gNBIdx).antennaArray, fc, az_angles, prsBeamAng(2, beamIdx), ...
+%             'PropagationSpeed', c, ...
+%             'Weights', wT{gNBIdx}(:, beamIdx));
+% 
+%         % 3. Clip the lower noise floor to -40 dB for a beautiful, textbook-style plot
+%         pat = max(pat, -40); 
+% 
+%         % 4. Plot on the polar axis
+%         polarplot(deg2rad(az_angles), pat, 'LineWidth', 1.5);
+%     end
+% 
+%     % Format the polar plot for a clean, professional look
+%     ax.RLim = [-40, max(pat(:))+5]; 
+%     title(['12-Beam Refined PRS Codebook (Azimuth Cut) - gNB ', num2str(reachable_gNBs(gNBIdx).pci)], 'FontSize', 12);
+%     hold off;
+% end
                 % Apply Digital Beamforming
                 % Loop over all PRS resources and apply the digital beamforming to 
                 % all the active ones. Digital beamforming is considered to offer frequency 
@@ -840,6 +900,220 @@ for posIdx = 1: numUEPos
             end
         end
         
-        estimated_ue = Non_linear_LS_AoA2(rho_aoa, u_0, s_aoa, K, stop_cond, dimensions)
+        %% Calculate and Store Errors
+        %% Calculate and Store Errors
+        % 1. Calculate final position using your Non-Linear Least Squares solver
+        estimated_ue = Non_linear_LS_AoA2(rho_aoa, u_0, s_aoa, K, stop_cond, dimensions);
+        
+        % 2. Calculate Total 3D Euclidean Error
+        error_euclidean(track_idx) = norm(estimated_ue(:) - UE_xyz(:));
+        
+        % 3. Calculate LSh (Horizontal Error - X and Y only)
+        error_horizontal(track_idx) = norm(estimated_ue(1:2) - UE_xyz(1:2));
+        
+        % 4. Calculate LSv (Vertical Error - Z only)
+        error_vertical(track_idx) = abs(estimated_ue(3) - UE_xyz(3));       
+        % 3. Calculate Angular Error for each Base Station
+        for gNBIdx = 1:numgNBs
+            [~, real_angle] = rangeangle(reachable_gNBs(gNBIdx).getXYZ()', UE_xyz');
+            
+            % If refinement happened, use refined_AoA, else coarse_AoA
+            if refinement && numBeams ~= 0
+                calc_angle = refined_AoA(gNBIdx, :);
+                % Store the max RSRP used for this calculation
+                [~,maxRSRPIdx] = max(rsrp{gNBIdx},[],'all','linear');
+                measured_rsrp(end+1) = rsrp{gNBIdx}(maxRSRPIdx);
+            else
+                calc_angle = coarse_AoA(gNBIdx, :);
+                measured_rsrp(end+1) = NaN; % Or a coarse RSRP value
+            end
+            
+            % Calculate absolute angular error (Azimuth and Elevation)
+            error_azimuth(end+1) = abs(calc_angle(1) - real_angle(1));
+            error_elevation(end+1) = abs(calc_angle(2) - real_angle(2));
+        end
+        
+        track_idx = track_idx + 1;
+       % ---------------------------------------------------------
+        % Plot the Estimated UE Location in SiteViewer
+        % ---------------------------------------------------------
+        % 1. Get the origin (Reference Site) Latitude and Longitude
+        origin_lat = listUEPos(ref_site, 1);
+        origin_lon = listUEPos(ref_site, 2);
+        R_earth = 6371000; % Radius of Earth in meters
+        
+        % 2. Convert Estimated X/Y meters back to Latitude/Longitude offsets
+        est_lat = origin_lat + (estimated_ue(2) / R_earth) * (180 / pi);
+        est_lon = origin_lon + (estimated_ue(1) / (R_earth * cosd(origin_lat))) * (180 / pi);
+        
+        % 3. Create a dynamic label containing the exact error (no emoji for broader compatibility)
+        label_text = sprintf('ESTIMATED (Error: %.1fm)', error_euclidean(track_idx - 1));
+        
+        % 4. Create the new "Estimated" Receiver Site with a distinct color
+        % Use MarkerColor property to set a distinct color (e.g., magenta) and a larger MarkerSize.
+        % rxsite supports Name, Latitude, Longitude, AntennaHeight and many visualization options in SiteViewer.
+        estimated_ue_site = txsite("Name", label_text, ...
+            "Latitude", est_lat, ...
+            "Longitude", est_lon, ...
+            "AntennaHeight", abs(estimated_ue(3)));        % Changes color to red
+        show(estimated_ue_site);
+       
+        % Clear the map for the next loop iteration
+        if posIdx < numUEPos
+            % viewer.clearMap();
+             for rep_gNB = 1:numgNBs
+                 show(bsSite{rep_gNB});
+             end
+        end
     end
 end
+%% Generate Performance Analysis Figures
+
+% Clean up angular errors (handle 360-degree wrap-around)
+error_azimuth(error_azimuth > 180) = 360 - error_azimuth(error_azimuth > 180);
+
+% ---------------------------------------------------------
+% Figure 1: CDF of Euclidean Positioning Error
+% ---------------------------------------------------------
+valid_errors = error_euclidean(~isnan(error_euclidean));
+
+figure('Name', 'Positioning Error CDF', 'Color', 'w');
+h = cdfplot(valid_errors);
+set(h, 'LineWidth', 2);
+grid on;
+title('CDF of 3D Positioning Error (DL-AoD)', 'FontSize', 14);
+xlabel('Euclidean Error (Meters)', 'FontSize', 12);
+ylabel('Cumulative Probability', 'FontSize', 12);
+
+% Cap the X-axis so massive NLOS outliers don't squash the curve
+% This limits the view to either 50 meters or the 95th percentile (whichever is smaller)
+max_display_error = min(50, prctile(valid_errors, 95)); 
+if isempty(max_display_error) || isnan(max_display_error) || max_display_error == 0
+    max_display_error = 20; % Safe fallback
+end
+xlim([0, max_display_error]);
+
+% Add an 80th percentile marker for your presentation
+perc_80 = prctile(valid_errors, 80);
+hold on;
+xline(perc_80, 'r--', ['80% < ' num2str(round(perc_80,2)) 'm'], 'LabelVerticalAlignment', 'bottom', 'LineWidth', 1.5);
+hold off;
+
+% ---------------------------------------------------------
+% Figure 2: Angular Error vs. RSRP (Signal Quality)
+% ---------------------------------------------------------
+figure('Name', 'Angular Error vs RSRP', 'Color', 'w');
+scatter(measured_rsrp, error_azimuth, 40, 'b', 'filled', 'MarkerEdgeColor', 'k');
+grid on;
+title('Azimuth Estimation Error vs. Received Power (RSRP)', 'FontSize', 14);
+xlabel('Maximum RSRP (dBm)', 'FontSize', 12);
+ylabel('Absolute Azimuth Error (Degrees)', 'FontSize', 12);
+
+% Add a trendline to show that stronger signals = lower error
+hold on;
+p = polyfit(measured_rsrp, error_azimuth, 1);
+yfit = polyval(p, measured_rsrp);
+plot(measured_rsrp, yfit, 'r-', 'LineWidth', 2);
+legend('Measurement Points', 'Trendline');
+hold off;
+% ---------------------------------------------------------
+% Figure 3: CRLB vs. Azimuth Angle Noise (The "Fig 3-b" Clone)
+% ---------------------------------------------------------
+disp('Calculating Geometric CRLB and NLS Monte Carlo Sweep...');
+
+% Define a range of theoretical angle noises (1 to 5 degrees)
+sigma_deg_range = 1:0.5:5; 
+sigma_rad_range = deg2rad(sigma_deg_range);
+
+% Ground Truth coordinates
+true_x = UE_xyz(1);
+true_y = UE_xyz(2);
+
+% Storage arrays for the plot
+CRLB_h = zeros(length(sigma_rad_range), 1);
+LS_h_sim = zeros(length(sigma_rad_range), 1);
+
+% Get the TRUE angles from the Base Stations to the UE
+true_angles_rad = zeros(size(s_aoa, 1), 1);
+for i = 1:size(s_aoa, 1)
+    [~, ang] = rangeangle(s_aoa(i,:)', UE_xyz');
+    true_angles_rad(i) = deg2rad(ang(1)); % Azimuth in radians
+end
+
+for k = 1:length(sigma_rad_range)    % --- 1. Calculate Theoretical CRLB ---
+J = zeros(2, 2); 
+
+% CRITICAL FIX: Extract only unique physical Base Station coordinates!
+% 3 sectors on the same tower only provide 1 geometric anchor point.
+unique_bs_coords = unique(s_aoa(:, 1:2), 'rows');
+
+% Optional: Print this to the console so you can see if the UE is "blind"
+disp(['Unique Physical Towers visible to UE: ', num2str(size(unique_bs_coords, 1))]);
+
+for i = 1:size(unique_bs_coords, 1)
+    bs_x = unique_bs_coords(i, 1);
+    bs_y = unique_bs_coords(i, 2);
+    
+    dx = true_x - bs_x;
+    dy = true_y - bs_y;
+    d2 = dx^2 + dy^2; % Distance squared
+    
+    % Jacobian for angle measurement
+    H_i = [-dy/d2; dx/d2]; 
+    
+    % Add to the Fisher Information Matrix
+    J = J + (1 / sigma_rad_range(k)^2) * (H_i * H_i');
+end
+
+% Check if the geometry is physically solvable (needs at least 2 distinct towers)
+if rank(J) >= 2
+    Cov_Matrix = inv(J);
+    CRLB_h(k) = sqrt(trace(Cov_Matrix)); 
+else
+    % If rank is < 2, the UE only sees 1 tower. Triangulation is impossible.
+    CRLB_h(k) = NaN; 
+    disp('Warning: FIM is singular. Geometry is unsolvable (Need >= 2 unique towers).');
+end
+    
+    % --- 2. Calculate Actual NLS Algorithm Performance ---
+    % Run 50 tests per noise level to get a smooth average
+    mc_runs = 50; 
+    temp_ls_error = zeros(mc_runs, 1);
+    
+    for mc = 1:mc_runs
+        % Inject random Gaussian noise into the true angles
+        noisy_angles_rad = true_angles_rad + (sigma_rad_range(k) * randn(size(true_angles_rad)));
+        
+        % Format for your NLS solver [Azimuth_rad, Elevation_rad]
+        rho_aoa_sim = [noisy_angles_rad, zeros(size(noisy_angles_rad))];
+        
+        % Run your NLS algorithm blindly
+        est_ue_sim = Non_linear_LS_AoA2(rho_aoa_sim, u_0, s_aoa, K, stop_cond, dimensions);
+        
+        % Calculate Horizontal Error for this run
+        temp_ls_error(mc) = norm(est_ue_sim(1:2) - [true_x; true_y]);
+    end
+    
+    % Store the Root Mean Square Error (RMSE) for this noise level
+    LS_h_sim(k) = sqrt(mean(temp_ls_error.^2));
+end
+
+% --- 3. Plot the IEEE-Style Figure ---
+figure('Name', 'CRLB Analysis', 'Color', 'w');
+semilogy(sigma_deg_range, CRLB_h, '-s', 'Color', [0.85 0.15 0.15], 'LineWidth', 1.5, 'MarkerSize', 8); 
+hold on;
+semilogy(sigma_deg_range, LS_h_sim, '-d', 'Color', [0.15 0.25 0.65], 'LineWidth', 1.5, 'MarkerSize', 8); 
+
+% Apply IEEE-style Grid and Limits
+grid on;
+set(gca, 'YScale', 'log');
+set(gca, 'YMinorGrid', 'on'); 
+set(gca, 'XMinorGrid', 'on');
+
+xlim([1 5]);
+% ylim([0.01 100]); % Uncomment this if you want to force the exact Y-axis scale as the paper
+
+title('Horizontal Error vs. Standard Deviation of Azimuth Angle Noise', 'FontSize', 11);
+xlabel('Standard deviation of azimuth noise \sigma_{m_i} [^\circ]', 'FontSize', 12);
+ylabel('RMSE [m]', 'FontSize', 12);
+legend('CRLB_h (Theoretical Limit)', 'LS_h (Our NLS Algorithm)', 'Location', 'northwest', 'Orientation', 'vertical');

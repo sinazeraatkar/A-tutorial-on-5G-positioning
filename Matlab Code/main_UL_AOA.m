@@ -6,16 +6,16 @@ clearvars -except viewer;
 rng(42);                       % Set RNG state for repeatability
 pd = truncate(makedist("Normal", "sigma",50),-100,100); % probability distribution
                             
-reflections_order = 2;       % 0 (LOS) default | 1 (NLOS)
+reflections_order = 10;       % 0 (LOS) default | 1 (NLOS)
 plot_rays = true;            % plot raytracer rays on map
 refinement = false;          % true (parabolic interpolation) default | false
 
 num_tests = 1;             
 dimensions = 3;            % 2/3-D
 K = 1000;                  % number of iteration for NLS algorithm
-stop_cond = 1e-4;
+stop_cond = 1e-6;
 
-drop_nlos = true;           % drop NLOS BS
+drop_nlos =false;           % drop NLOS BS
 BS_synch = true;            % BS synchronized?
 max_gNBs = 4;               % Max number of BS used
 
@@ -91,13 +91,21 @@ ueArrayOrientation = [0 45].';      % azimuth (0 deg is E, 90 deg is N) and
 
 
 %% UE positions
-load ue_positions/giuriati.mat
-numUEPos = size(listUEPos,1); 
+listUEPos = [
+    48.624447,2.443156
+];
+numUEPos = size(listUEPos,1);
 
 %% gNBs positions
 n_cell = 3; % number of cells
-h_gNB = 4; % height [m]
-load bs_positions/campus_leonardo.mat % bs positions and map name
+h_gNB = 6; % height [m]
+
+% Manually define 4 Base Stations surrounding the UE in Palaiseau
+gNBPos = [
+     48.624516,2.442086 % South-East of UE
+     48.623647,2.446412
+     48.622207,2.443953
+];
 
 numBSs = size(gNBPos,1);
 TxArrayOrientation = [[0 0]; [120 0]; [-120 0]];
@@ -117,12 +125,13 @@ end
 numgNBs = size(gNBs,1);
 
 %% Setup Viewer
-
 if exist('viewer','var') && isvalid(viewer) % viewer handle exists and viewer window is open
     viewer.clearMap();
 else
-    viewer = siteviewer("Basemap","openstreetmap","Buildings",map);   
+    % Explicitly load your custom OSM file
+    viewer = siteviewer("Basemap","openstreetmap","Buildings","map.osm");   
 end
+
 
 bsSite = cell(1,numgNBs);
 
